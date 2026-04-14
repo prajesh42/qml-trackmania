@@ -33,8 +33,20 @@ if cfg.PRAGMA_LIDAR:
         POLICY = SquashedGaussianRNNActor
     else:
         if ALG_NAME == "QSAC":
-            TRAIN_MODEL = QuantumMLPActorCritic
-            POLICY = QuantumSquashedGaussianMLPActor
+            quantum_backend = str(ALG_CONFIG.get("QUANTUM_BACKEND", "fallback")).strip().lower()
+            if ALG_CONFIG.get("USE_QISKIT_BACKEND", False):
+                quantum_backend = "qiskit"
+            quantum_kwargs = dict(
+                quantum_backend=quantum_backend,
+                qiskit_num_qubits=ALG_CONFIG.get("QISKIT_NUM_QUBITS", 6),
+                qiskit_reuploads=ALG_CONFIG.get("QISKIT_REUPLOADS", 1),
+                qiskit_angle_scale=ALG_CONFIG.get("QISKIT_ANGLE_SCALE", 3.141592653589793),
+                qiskit_seed=ALG_CONFIG.get("QISKIT_SEED", 1234),
+                qiskit_fallback_on_error=ALG_CONFIG.get("QISKIT_FALLBACK_ON_ERROR", True),
+                qiskit_strict=ALG_CONFIG.get("QISKIT_STRICT", False),
+            )
+            TRAIN_MODEL = partial(QuantumMLPActorCritic, **quantum_kwargs)
+            POLICY = partial(QuantumSquashedGaussianMLPActor, **quantum_kwargs)
         else:
             TRAIN_MODEL = MLPActorCritic if ALG_NAME == "SAC" else REDQMLPActorCritic
             POLICY = SquashedGaussianMLPActor
