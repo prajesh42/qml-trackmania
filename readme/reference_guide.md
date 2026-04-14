@@ -55,7 +55,15 @@ All parameters are described below.
   "MEMORY_SIZE": 1000000,  // REPLAY BUFFER SIZE (maximum number of samples in the Memory)
   "BATCH_SIZE": 256,  // training batch size
   "ALG": {  // this section contains parameters of the training algorithm:
-    "ALGORITHM": "SAC",  // algorithm name ("SAC", "REDQSAC")
+    "ALGORITHM": "SAC",  // algorithm name ("SAC", "REDQSAC", "QSAC")
+    "QUANTUM_BACKEND": "fallback",  // for "QSAC": "fallback" or "qiskit"
+    "USE_QISKIT_BACKEND": false,  // if true, overrides QUANTUM_BACKEND and enables "qiskit"
+    "QISKIT_NUM_QUBITS": 6,  // for "QSAC" + "qiskit"
+    "QISKIT_REUPLOADS": 1,  // for "QSAC" + "qiskit"
+    "QISKIT_ANGLE_SCALE": 3.141592653589793,  // for "QSAC" + "qiskit"
+    "QISKIT_SEED": 1234,  // for "QSAC" + "qiskit"
+    "QISKIT_FALLBACK_ON_ERROR": true,  // if qiskit init/runtime fails, fallback to torch feature map
+    "QISKIT_STRICT": false,  // if true, qiskit failures raise instead of falling back
     "LEARN_ENTROPY_COEF":false,  // true for SACv2
     "LR_ACTOR":0.00001,  // learning rate of the actor
     "LR_CRITIC":0.00005,  // learning rate of the critic
