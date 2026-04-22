@@ -32,7 +32,9 @@ def main(args):
                            model_path=cfg.MODEL_PATH_WORKER,
                            obs_preprocessor=cfg_obj.OBS_PREPROCESSOR,
                            crc_debug=cfg.CRC_DEBUG,
-                           standalone=args.test)
+                           standalone=args.test or args.benchmark)
+        if args.benchmark:
+            logging.info("Benchmark worker running in standalone mode (no server connection).")
         if args.worker:
             rw.run()
         elif args.expert:
