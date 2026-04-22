@@ -10,3 +10,6 @@ conda install pywin32
 pip install tmrl
 ##  validate tmrl installation
 python -m tmrl --install
+## copy the config
+1. Copy the quantum config from config_setup directory
+2. Paste the content of quantum_config.json inside config.json in the user directory as C:\Users\(username)\TmrlData\config\config.json
