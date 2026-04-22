@@ -72,7 +72,8 @@ class TM2020Interface(RealTimeGymInterface):
             import vgamepad as vg
             self.j = vg.VX360Gamepad()
             logging.debug(" virtual joystick in use")
-        self.window_interface = WindowInterface("Trackmania")
+        window_name = cfg.ENV_CONFIG["WINDOW_NAME"] if "WINDOW_NAME" in cfg.ENV_CONFIG else "Trackmania"
+        self.window_interface = WindowInterface(window_name)
         self.window_interface.move_and_resize()
         self.last_time = time.time()
         self.img_hist = deque(maxlen=self.img_hist_len)

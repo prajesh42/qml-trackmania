@@ -12,20 +12,50 @@ if platform.system() == "Windows":
     import win32gui
     import win32ui
     import win32con
+    import time
+
+    def _find_window_handle(window_name):
+        # Try exact match first.
+        hwnd = win32gui.FindWindow(None, window_name)
+        if hwnd != 0:
+            return hwnd
+
+        # Fallback to case-insensitive substring matching over visible top-level windows.
+        wanted = window_name.strip().lower()
+        matches = []
+
+        def _enum_cb(h, _):
+            if not win32gui.IsWindowVisible(h):
+                return
+            title = win32gui.GetWindowText(h)
+            if not title:
+                return
+            if wanted in title.lower():
+                matches.append(h)
+
+        win32gui.EnumWindows(_enum_cb, None)
+        return matches[0] if matches else 0
 
 
     class WindowInterface:
         def __init__(self, window_name):
             self.window_name = window_name
 
-            hwnd = win32gui.FindWindow(None, self.window_name)
+            hwnd = _find_window_handle(self.window_name)
             assert hwnd != 0, f"Could not find a window named {self.window_name}."
 
+            t0 = time.time()
             while True:  # in case the window is reduced
                 wr = win32gui.GetWindowRect(hwnd)
                 cr = win32gui.GetClientRect(hwnd)
                 if cr[2] > 0 and cr[3] > 0:
                     break
+                if time.time() - t0 > 5.0:
+                    raise RuntimeError(
+                        f"Window '{self.window_name}' has zero client size for more than 5s. "
+                        f"Make sure Trackmania is visible (not minimized) before starting the worker."
+                    )
+                time.sleep(0.05)
 
             self.w_diff = wr[2] - wr[0] - cr[2] + cr[0]  # (16 on W10)
             self.h_diff = wr[3] - wr[1] - cr[3] + cr[1]  # (39 on W10)
@@ -36,15 +66,22 @@ if platform.system() == "Windows":
             self.y_origin_offset = 0
 
         def screenshot(self):
-            hwnd = win32gui.FindWindow(None, self.window_name)
+            hwnd = _find_window_handle(self.window_name)
             assert hwnd != 0, f"Could not find a window named {self.window_name}."
 
+            t0 = time.time()
             while True:  # avoids crashes when the window is reduced
                 x, y, x1, y1 = win32gui.GetWindowRect(hwnd)
                 w = x1 - x - self.w_diff
                 h = y1 - y - self.h_diff
                 if w > 0 and h > 0:
                     break
+                if time.time() - t0 > 5.0:
+                    raise RuntimeError(
+                        f"Window '{self.window_name}' has zero size for more than 5s while capturing frames. "
+                        f"Bring Trackmania back to a normal, visible window."
+                    )
+                time.sleep(0.05)
             hdc = win32gui.GetWindowDC(hwnd)
             dc = win32ui.CreateDCFromHandle(hdc)
             memdc = dc.CreateCompatibleDC()
@@ -66,7 +103,7 @@ if platform.system() == "Windows":
             y += self.y_origin_offset
             w += self.w_diff
             h += self.h_diff
-            hwnd = win32gui.FindWindow(None, self.window_name)
+            hwnd = _find_window_handle(self.window_name)
             assert hwnd != 0, f"Could not find a window named {self.window_name}."
             win32gui.MoveWindow(hwnd, x, y, w, h, True)
 
