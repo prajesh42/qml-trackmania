@@ -9,6 +9,8 @@ import shutil
 import tempfile
 import itertools
 from os.path import exists
+from threading import Thread
+from queue import Queue
 
 # third-party imports
 import numpy as np
@@ -459,7 +461,8 @@ class RolloutWorker:
             max_buf_len=cfg.BUFFER_SIZE,
             security=cfg.SECURITY,
             keys_dir=cfg.CREDENTIALS_DIRECTORY,
-            hostname=cfg.HOSTNAME
+            hostname=cfg.HOSTNAME,
+            endpoint_connect_timeout=None
     ):
         """
         Args:
@@ -489,6 +492,7 @@ class RolloutWorker:
             security (str): tlspyo security type (None or "TLS")
             keys_dir (str): tlspyo credentials directory; usually, leave this to the default
             hostname (str): tlspyo hostname; usually, leave this to the default
+            endpoint_connect_timeout (float): timeout in seconds for connecting to the server endpoint
         """
         self.obs_preprocessor = obs_preprocessor
         self.get_local_buffer_sample = sample_compressor
@@ -502,7 +506,15 @@ class RolloutWorker:
         self.standalone = standalone
         if os.path.isfile(self.model_path):
             logging.debug(f"Loading model from {self.model_path}")
-            self.actor = self.actor.load(self.model_path, device=self.device)
+            try:
+                self.actor = self.actor.load(self.model_path, device=self.device)
+            except Exception as exc:
+                logging.warning(
+                    f"Could not load model from {self.model_path}. "
+                    f"Starting with freshly initialized weights. "
+                    f"This can happen when switching model architectures (e.g. SAC -> QSAC). "
+                    f"Details: {exc}"
+                )
         else:
             logging.debug(f"No model found at {self.model_path}")
         self.buffer = Buffer()
@@ -520,17 +532,56 @@ class RolloutWorker:
         print_with_timestamp(f"server IP: {self.server_ip}")
 
         if not self.standalone:
-            self.__endpoint = Endpoint(ip_server=self.server_ip,
-                                       port=server_port,
-                                       password=password,
-                                       groups="workers",
-                                       local_com_port=local_port,
-                                       header_size=header_size,
-                                       max_buf_len=max_buf_len,
-                                       security=security,
-                                       keys_dir=keys_dir,
-                                       hostname=hostname,
-                                       deserializer_mode="synchronous")
+            # fail fast when a stale worker process already owns this local endpoint port
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("127.0.0.1", local_port))
+            except OSError as exc:
+                raise RuntimeError(
+                    f"LOCAL_PORT_WORKER={local_port} is already in use on 127.0.0.1. "
+                    f"This usually means an old worker process is still running. "
+                    f"Stop stale tmrl processes or change LOCAL_PORT_WORKER in config.json."
+                ) from exc
+
+            timeout_s = endpoint_connect_timeout
+            if timeout_s is None:
+                timeout_s = cfg.TMRL_CONFIG["ENDPOINT_CONNECT_TIMEOUT"] if "ENDPOINT_CONNECT_TIMEOUT" in cfg.TMRL_CONFIG else 20.0
+
+            endpoint_queue = Queue(maxsize=1)
+
+            def _build_endpoint():
+                try:
+                    endpoint = Endpoint(ip_server=self.server_ip,
+                                        port=server_port,
+                                        password=password,
+                                        groups="workers",
+                                        local_com_port=local_port,
+                                        header_size=header_size,
+                                        max_buf_len=max_buf_len,
+                                        security=security,
+                                        keys_dir=keys_dir,
+                                        hostname=hostname,
+                                        deserializer_mode="synchronous")
+                    endpoint_queue.put(("ok", endpoint))
+                except Exception as exc:
+                    endpoint_queue.put(("err", exc))
+
+            logging.info(f"Connecting worker endpoint to {self.server_ip}:{server_port} (timeout {timeout_s}s)...")
+            connect_thread = Thread(target=_build_endpoint, daemon=True)
+            connect_thread.start()
+            connect_thread.join(timeout=float(timeout_s))
+            if connect_thread.is_alive():
+                raise TimeoutError(
+                    f"Worker endpoint connection timed out after {timeout_s}s. "
+                    f"Check that the server is running, IP/PORT/PASSWORD/TLS match across terminals, "
+                    f"and that you launch all entities with the same Python environment."
+                )
+
+            status, payload = endpoint_queue.get()
+            if status == "err":
+                raise payload
+            self.__endpoint = payload
+            logging.info("Worker endpoint connected.")
         else:
             self.__endpoint = None
 
@@ -955,7 +1006,14 @@ class RolloutWorker:
                     self._cur_hist_cpt = 0
                     if verbose:
                         print_with_timestamp("model weights saved in history")
-            self.actor = self.actor.load(self.model_path, device=self.device)
+            try:
+                self.actor = self.actor.load(self.model_path, device=self.device)
+            except Exception as exc:
+                logging.warning(
+                    f"Received incompatible model weights; keeping current actor and ignoring this update. "
+                    f"Details: {exc}"
+                )
+                return 0
             if verbose:
                 print_with_timestamp("model weights have been updated")
         return nb_received
