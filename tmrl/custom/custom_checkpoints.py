@@ -88,9 +88,27 @@ def update_run_instance(run_instance, training_cls):
     # update training Agent:
     ALG_CONFIG = cfg.TMRL_CONFIG["ALG"]
     ALG_NAME = ALG_CONFIG["ALGORITHM"]
-    assert ALG_NAME in ["SAC", "REDQSAC"], f"{ALG_NAME} is not supported by this checkpoint updater."
+    assert ALG_NAME in ["SAC", "REDQSAC", "QSAC"], f"{ALG_NAME} is not supported by this checkpoint updater."
 
-    if ALG_NAME in ["SAC", "REDQSAC"]:
+    # if algorithm/model architecture changed, start from a fresh compatible run instance while keeping replay memory
+    run_instance_candidate = training_cls()
+    checkpoint_alg = run_instance.agent.__class__.__name__
+    target_alg = run_instance_candidate.agent.__class__.__name__
+    checkpoint_model = run_instance.agent.model.__class__.__name__
+    target_model = run_instance_candidate.agent.model.__class__.__name__
+    if checkpoint_alg != target_alg or checkpoint_model != target_model:
+        logging.warning(
+            "Checkpoint architecture is incompatible with current config. "
+            f"Checkpoint agent/model: {checkpoint_alg}/{checkpoint_model}, "
+            f"Target agent/model: {target_alg}/{target_model}. "
+            "Starting a fresh run instance and reusing replay memory."
+        )
+        run_instance_candidate.memory = run_instance.memory
+        run_instance_candidate = update_memory(run_instance_candidate)
+        run_instance_candidate.total_samples = len(run_instance_candidate.memory)
+        return run_instance_candidate
+
+    if ALG_NAME in ["SAC", "REDQSAC", "QSAC"]:
         lr_actor = ALG_CONFIG["LR_ACTOR"]
         lr_critic = ALG_CONFIG["LR_CRITIC"]
         lr_entropy = ALG_CONFIG["LR_ENTROPY"]
@@ -100,7 +118,7 @@ def update_run_instance(run_instance, training_cls):
         target_entropy = ALG_CONFIG["TARGET_ENTROPY"]
         alpha = ALG_CONFIG["ALPHA"]
 
-        if ALG_NAME == "SAC":
+        if ALG_NAME in ["SAC", "QSAC"]:
             if run_instance.agent.lr_actor != lr_actor:
                 old = run_instance.agent.lr_actor
                 run_instance.agent.lr_actor = lr_actor
