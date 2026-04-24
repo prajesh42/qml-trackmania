@@ -260,6 +260,9 @@ class QuantumSquashedGaussianMLPActor(TorchActorModule):
         qiskit_seed: int = 1234,
         qiskit_fallback_on_error: bool = True,
         qiskit_strict: bool = False,
+        forward_bias_init: float = 1.8,
+        brake_bias_init: float = -2.0,
+        steer_bias_init: float = 0.0,
     ):
         super().__init__(observation_space, action_space)
         dim_obs, tuple_obs = _obs_dim_and_mode(observation_space)
@@ -282,6 +285,15 @@ class QuantumSquashedGaussianMLPActor(TorchActorModule):
         )
         self.mu_layer = nn.Linear(hidden_dim, dim_act)
         self.log_std_layer = nn.Linear(hidden_dim, dim_act)
+        # Action layout for TrackMania is [gas, brake, steer].
+        # Positive gas bias + negative brake bias yields forward starts.
+        if dim_act > 0:
+            with torch.no_grad():
+                self.mu_layer.bias[0] = float(forward_bias_init)
+                if dim_act > 1:
+                    self.mu_layer.bias[1] = float(brake_bias_init)
+                if dim_act > 2:
+                    self.mu_layer.bias[2] = float(steer_bias_init)
 
     def _flatten_obs(self, obs):
         return torch.cat(obs, -1) if self.tuple_obs else torch.flatten(obs, start_dim=1)
@@ -375,6 +387,9 @@ class QuantumMLPActorCritic(nn.Module):
         qiskit_seed: int = 1234,
         qiskit_fallback_on_error: bool = True,
         qiskit_strict: bool = False,
+        forward_bias_init: float = 1.8,
+        brake_bias_init: float = -2.0,
+        steer_bias_init: float = 0.0,
     ):
         super().__init__()
         self.actor = QuantumSquashedGaussianMLPActor(
@@ -389,6 +404,9 @@ class QuantumMLPActorCritic(nn.Module):
             qiskit_seed=qiskit_seed,
             qiskit_fallback_on_error=qiskit_fallback_on_error,
             qiskit_strict=qiskit_strict,
+            forward_bias_init=forward_bias_init,
+            brake_bias_init=brake_bias_init,
+            steer_bias_init=steer_bias_init,
         )
         self.q1 = QuantumMLPQFunction(
             obs_space=observation_space,

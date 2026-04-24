@@ -44,6 +44,9 @@ if cfg.PRAGMA_LIDAR:
                 qiskit_seed=ALG_CONFIG.get("QISKIT_SEED", 1234),
                 qiskit_fallback_on_error=ALG_CONFIG.get("QISKIT_FALLBACK_ON_ERROR", True),
                 qiskit_strict=ALG_CONFIG.get("QISKIT_STRICT", False),
+                forward_bias_init=ALG_CONFIG.get("FORWARD_BIAS_INIT", 1.8),
+                brake_bias_init=ALG_CONFIG.get("BRAKE_BIAS_INIT", -2.0),
+                steer_bias_init=ALG_CONFIG.get("STEER_BIAS_INIT", 0.0),
             )
             TRAIN_MODEL = partial(QuantumMLPActorCritic, **quantum_kwargs)
             POLICY = partial(QuantumSquashedGaussianMLPActor, **quantum_kwargs)

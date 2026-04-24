@@ -64,6 +64,9 @@ All parameters are described below.
     "QISKIT_SEED": 1234,  // for "QSAC" + "qiskit"
     "QISKIT_FALLBACK_ON_ERROR": true,  // if qiskit init/runtime fails, fallback to torch feature map
     "QISKIT_STRICT": false,  // if true, qiskit failures raise instead of falling back
+    "FORWARD_BIAS_INIT": 1.8,  // for "QSAC": positive initial gas bias to move forward from episode start
+    "BRAKE_BIAS_INIT": -2.0,  // for "QSAC": negative initial brake/reverse bias to avoid moving backward
+    "STEER_BIAS_INIT": 0.0,  // for "QSAC": neutral initial steer bias
     "LEARN_ENTROPY_COEF":false,  // true for SACv2
     "LR_ACTOR":0.00001,  // learning rate of the actor
     "LR_CRITIC":0.00005,  // learning rate of the critic
