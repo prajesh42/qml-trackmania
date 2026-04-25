@@ -1,0 +1,3 @@
+step,episode_reward,episode_length,critic_loss,actor_loss,alpha_loss,alpha,timestamp
+499,128.8859388930723,500,0.0,0.0,0.0,0.0,1777105896.636102
+999,125.93778040492907,500,0.0,0.0,0.0,0.0,1777105896.6822872
