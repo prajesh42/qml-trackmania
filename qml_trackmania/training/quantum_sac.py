@@ -132,7 +132,11 @@ class QuantumSAC:
         Returns a dict of scalar losses for logging.
         """
         cfg = self.cfg.sac
+        import time
+        
+        t0 = time.time()
         obs, actions, rewards, next_obs, dones = self.buffer.sample(cfg.batch_size)
+        t1 = time.time()
 
         # ── 1. Critic update ──────────────────────────────────────────────────
         with torch.no_grad():
@@ -144,6 +148,7 @@ class QuantumSAC:
                 min_q_next - self.alpha * next_log_pi
             )
 
+        t2 = time.time()
         q1, q2 = self.critic(obs, actions)
         critic_loss = F.mse_loss(q1, target_q) + F.mse_loss(q2, target_q)
 
@@ -151,21 +156,25 @@ class QuantumSAC:
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=5.0)
         self.critic_opt.step()
+        t3 = time.time()
 
         # ── 2. Actor update ───────────────────────────────────────────────────
         # Freeze critic params during actor update (efficiency)
         for p in self.critic.parameters():
             p.requires_grad_(False)
 
+        t4 = time.time()
         new_actions, log_pi, _ = self.actor.get_action(obs)
         min_q = self.critic.min_q(obs, new_actions)
         actor_loss = (self.alpha * log_pi - min_q).mean()
+        t5 = time.time()
 
         self.actor_opt.zero_grad()
         actor_loss.backward()
         # Clip quantum gradients (can be large with param-shift)
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_opt.step()
+        t6 = time.time()
 
         for p in self.critic.parameters():
             p.requires_grad_(True)
@@ -189,6 +198,11 @@ class QuantumSAC:
             for p, p_tgt in zip(self.critic.parameters(), self.critic_target.parameters()):
                 p_tgt.data.mul_(1.0 - tau)
                 p_tgt.data.add_(tau * p.data)
+        t7 = time.time()
+
+        log.debug(f"Update timings: sample={t1-t0:.3f}s, actor_no_grad={t2-t1:.3f}s, "
+                  f"critic_update={t3-t2:.3f}s, actor_forward={t5-t4:.3f}s, "
+                  f"actor_update={t6-t5:.3f}s, soft_update={t7-t6:.3f}s")
 
         return {
             "critic_loss": critic_loss.item(),

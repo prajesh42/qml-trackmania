@@ -46,7 +46,7 @@ class QuantumConfig:
                  or an IBM Quantum backend string for real hardware
     """
     n_qubits: int = 4               # 4 qubits → 2^4 = 16-dim Hilbert space
-    n_reps: int = 2                 # ansatz repetitions (depth trade-off)
+    n_reps: int = 1                 # reduced circuit depth (was 2)
     shots: int = 1024              # for SamplerQNN; ignored by EstimatorQNN
     entanglement: str = "linear"   # "linear" | "full" | "circular"
     backend: str = "aer_simulator"  # swap to "ibm_kyoto" etc. for hardware
@@ -60,9 +60,9 @@ class QuantumConfig:
     # Post-head: maps n_qubits → 2*act_dim  (μ and log_σ for each action)
     use_post_head: bool = True
 
-    # Gradient method: "param_shift" | "finite_diff" | "spsa"
-    # param_shift is exact; spsa is noisy but faster for large circuits
-    gradient_method: str = "param_shift"
+    # Gradient method: "param_shift" | "spsa"
+    # spsa is faster (2 evals per param); param_shift is exact but slower
+    gradient_method: str = "spsa"
 
     @property
     def n_params(self) -> int:
@@ -83,22 +83,22 @@ class SACConfig:
     gamma: float = 0.99             # discount factor
     tau: float = 0.005              # soft target update rate
     alpha: float = 0.2              # initial entropy temperature
-    auto_alpha: bool = True         # automatic entropy tuning (recommended)
+    auto_alpha: bool = False        # disable for speed (no entropy tuning)
     target_entropy: float = -3.0   # = -act_dim by default
 
     # Learning rates — lower for quantum actor (PQC gradients are noisier)
-    actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
+    actor_lr: float = 1e-3          # higher to compensate for less frequent updates
+    critic_lr: float = 1e-3         # higher to compensate for less frequent updates
     alpha_lr: float = 3e-4
 
     # Replay buffer
     buffer_size: int = 500_000
-    batch_size: int = 256
+    batch_size: int = 32            # very small for fast quantum evals
 
     # Training schedule
     warmup_steps: int = 1_000      # random actions before learning starts
-    update_every: int = 1           # gradient steps per env step
-    updates_per_step: int = 1
+    update_every: int = 200         # update every 200 env steps (collect data faster)
+    updates_per_step: int = 4       # batch multiple updates together
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -71,6 +71,7 @@ def build_qnn(cfg: QuantumConfig) -> EstimatorQNN:
       - PQC (feature map + ansatz)
       - Pauli-Z observables (one per qubit)
       - Aer estimator backend
+      - Gradient method (param_shift or spsa)
 
     Returns
     -------
@@ -80,6 +81,8 @@ def build_qnn(cfg: QuantumConfig) -> EstimatorQNN:
           weight_params = θ[0..n_params-1]
           output_shape  = (n_qubits,)   one ⟨Z_i⟩ per qubit
     """
+    from qiskit_machine_learning.gradients import ParamShiftEstimatorGradient, SPSAEstimatorGradient
+    
     qc = build_full_circuit(cfg.n_qubits, cfg.n_reps, cfg.entanglement)
     observables = build_observables(cfg.n_qubits)
     estimator, backend, aer_device = build_estimator(cfg)
@@ -98,19 +101,27 @@ def build_qnn(cfg: QuantumConfig) -> EstimatorQNN:
         key=lambda p: str(p)
     )
 
+    # Select gradient method
+    if cfg.gradient_method == "spsa":
+        gradient = SPSAEstimatorGradient(estimator=estimator, epsilon=1e-5)
+    else:  # "param_shift" or default
+        gradient = ParamShiftEstimatorGradient()
+
     qnn = EstimatorQNN(
         circuit=qc,
         observables=observables,           # list of SparsePauliOp
         input_params=input_params,
         weight_params=weight_params,
         estimator=estimator,
+        gradient=gradient,                 # USE THE CONFIGURED GRADIENT METHOD
         input_gradients=False,             # we only need weight gradients
     )
 
     print(f"[QNN] Built EstimatorQNN — "
           f"qubits={cfg.n_qubits}, reps={cfg.n_reps}, "
           f"params={len(weight_params)}, output_dim={cfg.n_qubits}, "
-          f"aer_method={cfg.aer_method}, aer_device={aer_device}")
+          f"aer_method={cfg.aer_method}, aer_device={aer_device}, "
+          f"gradient={cfg.gradient_method}")
     return qnn
 
 
