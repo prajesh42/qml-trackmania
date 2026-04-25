@@ -11,4 +11,4 @@
 source venv/bin/activate
 cd ~/qml-trackmania
 
-python training/quantum_sac.py
+python qml_trackmania/training/quantum_sac.py
