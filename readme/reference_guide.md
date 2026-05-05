@@ -55,7 +55,7 @@ All parameters are described below.
   "MEMORY_SIZE": 1000000,  // REPLAY BUFFER SIZE (maximum number of samples in the Memory)
   "BATCH_SIZE": 256,  // training batch size
   "ALG": {  // this section contains parameters of the training algorithm:
-    "ALGORITHM": "SAC",  // algorithm name ("SAC", "REDQSAC")
+    "ALGORITHM": "SAC",  // algorithm name ("SAC", "REDQSAC", "QSAC")
     "LEARN_ENTROPY_COEF":false,  // true for SACv2
     "LR_ACTOR":0.00001,  // learning rate of the actor
     "LR_CRITIC":0.00005,  // learning rate of the critic
@@ -67,6 +67,9 @@ All parameters are described below.
     "REDQ_N":10,  // number of critic networks (REDQSAC)
     "REDQ_M":2,  // random subset size (REDQSAC)
     "REDQ_Q_UPDATES_PER_POLICY_UPDATE":20,  // (for REDQSAC)
+    "QUANTUM_N_QUBITS": 4,  // number of qubits in the Aer circuit (QSAC)
+    "QUANTUM_N_LAYERS": 1,  // number of variational circuit layers (QSAC)
+    "QUANTUM_ENCODER_SEED": 0,  // seed for the fixed classical-to-angle projection (QSAC)
     "OPTIMIZER_ACTOR": "adam",  // actor optimizer ("adam", "adamw", "sgd")
     "OPTIMIZER_CRITIC": "adam",  // critic optimizer ("adam", "adamw", "sgd")
     "BETAS_ACTOR": [0.997, 0.997],  // actor betas (for Adam and AdamW)

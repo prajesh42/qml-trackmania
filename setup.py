@@ -164,6 +164,8 @@ setup(
             'Topic :: Scientific/Engineering :: Artificial Intelligence',
         ],
     include_package_data=True,
-    extras_require={},
+    extras_require={
+        'qiskit': ['qiskit-aer>=0.17'],
+    },
     scripts=[],
     packages=find_packages(exclude=("tests", )))
