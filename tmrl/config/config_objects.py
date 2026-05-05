@@ -20,7 +20,7 @@ from tmrl.util import partial
 
 ALG_CONFIG = cfg.TMRL_CONFIG["ALG"]
 ALG_NAME = ALG_CONFIG["ALGORITHM"]
-assert ALG_NAME in ["SAC", "REDQSAC"], f"If you wish to implement {ALG_NAME}, do not use 'ALG' in config.json for that."
+assert ALG_NAME in ["SAC", "REDQSAC", "QSAC"], f"If you wish to implement {ALG_NAME}, do not use 'ALG' in config.json for that."
 
 
 # MODEL, GYM ENVIRONMENT, REPLAY MEMORY AND TRAINING: ===========
@@ -31,11 +31,26 @@ if cfg.PRAGMA_LIDAR:
         TRAIN_MODEL = RNNActorCritic
         POLICY = SquashedGaussianRNNActor
     else:
-        TRAIN_MODEL = MLPActorCritic if ALG_NAME == "SAC" else REDQMLPActorCritic
-        POLICY = SquashedGaussianMLPActor
+        if ALG_NAME == "SAC":
+            TRAIN_MODEL = MLPActorCritic
+            POLICY = SquashedGaussianMLPActor
+        elif ALG_NAME == "REDQSAC":
+            TRAIN_MODEL = REDQMLPActorCritic
+            POLICY = SquashedGaussianMLPActor
+        else:  # QSAC
+            try:
+                from tmrl.custom.quantum.quantum_models import QuantumActorCritic, SquashedGaussianQuantumActor
+            except ImportError as exc:
+                raise ImportError(
+                    "QSAC requires qiskit-aer. Install with `pip install -e .[qiskit]` "
+                    "or `pip install qiskit-aer` in your training environment."
+                ) from exc
+
+            TRAIN_MODEL = QuantumActorCritic
+            POLICY = SquashedGaussianQuantumActor
 else:
     assert not cfg.PRAGMA_RNN, "RNNs not supported yet"
-    assert ALG_NAME == "SAC", f"{ALG_NAME} is not implemented here."
+    assert ALG_NAME == "SAC", f"{ALG_NAME} is only implemented for the LIDAR pipeline."
     TRAIN_MODEL = VanillaCNNActorCritic if cfg.GRAYSCALE else VanillaColorCNNActorCritic
     POLICY = SquashedGaussianVanillaCNNActor if cfg.GRAYSCALE else SquashedGaussianVanillaColorCNNActor
 
@@ -101,7 +116,7 @@ MEMORY = partial(MEM,
 
 # ALGORITHM: ===================================================
 
-if ALG_NAME == "SAC":
+if ALG_NAME in ["SAC", "QSAC"]:
     AGENT = partial(
         SAC_Agent,
         device='cuda' if cfg.CUDA_TRAINING else 'cpu',
@@ -187,4 +202,4 @@ else:  # images
 
 DUMP_RUN_INSTANCE_FN = None if cfg.PRAGMA_LIDAR else None  # dump_run_instance_images_dataset
 LOAD_RUN_INSTANCE_FN = None if cfg.PRAGMA_LIDAR else None  # load_run_instance_images_dataset
-UPDATER_FN = update_run_instance if ALG_NAME in ["SAC", "REDQSAC"] else None
+UPDATER_FN = update_run_instance if ALG_NAME in ["SAC", "REDQSAC", "QSAC"] else None
