@@ -35,7 +35,19 @@ def record_reward_dist(path_reward=PATH_REWARD, use_keyboard=False):
                     is_recording = True
 
         if is_recording:
-            data = client.retrieve_data(sleep_if_empty=0.01)  # we need many points to build a smooth curve
+            try:
+                data = client.retrieve_data(sleep_if_empty=0.01)  # we need many points to build a smooth curve
+            except (AssertionError, ConnectionError, OSError) as exc:
+                logging.error(f"Telemetry stream error while recording reward: {exc}")
+                logging.error("Check that Trackmania is running and the OpenPlanet plugin is loaded, then try again.")
+                time.sleep(0.5)
+                continue
+
+            if data is None or len(data) < 9:
+                logging.warning("Received an invalid telemetry packet; still waiting for valid Trackmania data...")
+                time.sleep(0.01)
+                continue
+
             terminated = bool(data[8])
 
             if not use_keyboard:
@@ -46,6 +58,13 @@ def record_reward_dist(path_reward=PATH_REWARD, use_keyboard=False):
             if early_stop or terminated:
                 logging.info(f"Computing reward function checkpoints from captured positions...")
                 logging.info(f"Initial number of captured positions: {len(positions)}")
+
+                if len(positions) < 2:
+                    logging.warning("Not enough recorded points to build a reward trajectory. Keep driving longer before stopping.")
+                    if early_stop and use_keyboard:
+                        is_recording = False
+                    continue
+
                 positions = np.array(positions)
 
                 final_positions = [positions[0]]
@@ -68,7 +87,8 @@ def record_reward_dist(path_reward=PATH_REWARD, use_keyboard=False):
                 final_positions = np.array(final_positions)
                 logging.info(f"Final number of checkpoints in the reward function: {len(final_positions)}")
 
-                pickle.dump(final_positions, open(path, "wb"))
+                with open(path, "wb") as reward_file:
+                    pickle.dump(final_positions, reward_file)
                 logging.info(f"All done")
                 return
             else:
