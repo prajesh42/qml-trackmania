@@ -1,4 +1,5 @@
 import math
+import logging
 
 import numpy as np
 import torch
@@ -44,6 +45,8 @@ def _mlp(sizes, activation, output_activation=nn.Identity):
 
 
 class _AerCircuitBackend:
+    _capability_logged = False
+
     def __init__(self, n_qubits=4, n_layers=1):
         if n_qubits < 1:
             raise ValueError("n_qubits must be >= 1")
@@ -78,8 +81,58 @@ class _AerCircuitBackend:
 
         circuit.save_statevector()
         self.circuit = circuit
-        self.simulator = AerSimulator(method="statevector")
+        self.available_devices = self._query_available_devices()
+        self.requested_device = self._requested_aer_device()
+        self.simulator_device = self._select_simulator_device(self.requested_device, self.available_devices)
+        self.simulator = AerSimulator(method="statevector", device=self.simulator_device)
         self._z_signs = self._build_z_signs(self.n_qubits)
+
+        if not _AerCircuitBackend._capability_logged:
+            logging.info(
+                f"Qiskit Aer devices available: {self.available_devices}. "
+                f"Requested Aer device: {self.requested_device}. Using: {self.simulator_device}."
+            )
+            if self.simulator_device != "GPU":
+                logging.warning(
+                    "QSAC quantum simulator is running on CPU. "
+                    "Install GPU-enabled qiskit-aer and set ALG.QUANTUM_AER_DEVICE='GPU' to use GPU Aer."
+                )
+            _AerCircuitBackend._capability_logged = True
+
+    @staticmethod
+    def _requested_aer_device():
+        requested = cfg.TMRL_CONFIG.get("ALG", {}).get("QUANTUM_AER_DEVICE", "AUTO")
+        requested = str(requested).strip().upper()
+        if requested == "CUDA":
+            requested = "GPU"
+        if requested not in {"AUTO", "CPU", "GPU"}:
+            logging.warning(f"Invalid QUANTUM_AER_DEVICE='{requested}'. Falling back to AUTO.")
+            requested = "AUTO"
+        return requested
+
+    @staticmethod
+    def _query_available_devices():
+        try:
+            devices = AerSimulator(method="statevector").available_devices()
+            devices = tuple(str(device).upper() for device in devices)
+            if len(devices) == 0:
+                return ("CPU",)
+            return devices
+        except Exception as exc:
+            logging.warning(f"Could not query Qiskit Aer devices ({exc}). Assuming CPU only.")
+            return ("CPU",)
+
+    @staticmethod
+    def _select_simulator_device(requested_device, available_devices):
+        if requested_device == "CPU":
+            return "CPU"
+        if requested_device == "GPU":
+            if "GPU" in available_devices:
+                return "GPU"
+            logging.warning("QUANTUM_AER_DEVICE='GPU' requested but GPU is unavailable in this Aer build.")
+            return "CPU"
+        # AUTO mode
+        return "GPU" if "GPU" in available_devices else "CPU"
 
     @staticmethod
     def _build_z_signs(n_qubits):

@@ -21,6 +21,31 @@ import logging
 # Soft Actor-Critic ====================================================================================================
 
 
+def _log_resolved_torch_device(agent_name, requested_device, resolved_device):
+    cuda_available = torch.cuda.is_available()
+    resolved = torch.device(resolved_device)
+
+    if resolved.type == "cuda" and cuda_available:
+        gpu_index = resolved.index if resolved.index is not None else torch.cuda.current_device()
+        gpu_name = torch.cuda.get_device_name(gpu_index)
+        logging.info(
+            f"{agent_name} trainer device resolved to {resolved} "
+            f"(GPU {gpu_index}: {gpu_name}). torch.cuda.is_available()={cuda_available}"
+        )
+        return
+
+    logging.info(
+        f"{agent_name} trainer device resolved to {resolved}. "
+        f"torch.cuda.is_available()={cuda_available}"
+    )
+
+    if requested_device is not None and str(requested_device).startswith("cuda") and not cuda_available:
+        logging.warning(
+            f"{agent_name} requested CUDA device '{requested_device}' but torch CUDA is unavailable. "
+            f"Falling back to CPU."
+        )
+
+
 @dataclass(eq=0)
 class SpinupSacAgent(TrainingAgent):  # Adapted from Spinup
     observation_space: type
@@ -46,9 +71,11 @@ class SpinupSacAgent(TrainingAgent):  # Adapted from Spinup
 
     def __post_init__(self):
         observation_space, action_space = self.observation_space, self.action_space
-        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        requested_device = self.device
+        device = requested_device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         model = self.model_cls(observation_space, action_space)
-        logging.debug(f" device SAC: {device}")
+        _log_resolved_torch_device("SAC", requested_device=requested_device, resolved_device=device)
         self.model = model.to(device)
         self.model_target = no_grad(deepcopy(self.model))
 
@@ -317,9 +344,11 @@ class REDQSACAgent(TrainingAgent):
 
     def __post_init__(self):
         observation_space, action_space = self.observation_space, self.action_space
-        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        requested_device = self.device
+        device = requested_device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         model = self.model_cls(observation_space, action_space)
-        logging.debug(f" device REDQ-SAC: {device}")
+        _log_resolved_torch_device("REDQ-SAC", requested_device=requested_device, resolved_device=device)
         self.model = model.to(device)
         self.model_target = no_grad(deepcopy(self.model))
         self.pi_optimizer = Adam(self.model.actor.parameters(), lr=self.lr_actor)
