@@ -239,6 +239,20 @@ class SquashedGaussianQuantumActor(TorchActorModule):
         self.mu_layer = nn.Linear(last_dim, dim_act)
         self.log_std_layer = nn.Linear(last_dim, dim_act)
         self.act_limit = act_limit
+        self._init_action_priors(dim_act)
+
+    def _init_action_priors(self, dim_act):
+        with torch.no_grad():
+            if self.mu_layer.bias is not None:
+                self.mu_layer.bias.zero_()
+                if dim_act >= 1:
+                    self.mu_layer.bias[0] = 1.25  # forward by default
+                if dim_act >= 2:
+                    self.mu_layer.bias[1] = -2.5  # brake unlikely at start
+                if dim_act >= 3:
+                    self.mu_layer.bias[2] = 0.0
+            if self.log_std_layer.bias is not None:
+                self.log_std_layer.bias.fill_(-1.5)  # smoother early exploration
 
     def forward(self, obs, test=False, with_logprob=True):
         x = _flatten_obs(obs, self.tuple_obs)

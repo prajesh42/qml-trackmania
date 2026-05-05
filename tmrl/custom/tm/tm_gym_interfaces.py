@@ -98,6 +98,7 @@ class TM2020Interface(RealTimeGymInterface):
         Args:
             control: np.array: [forward,backward,right,left]
         """
+        control = self._sanitize_control(control)
         if self.gamepad:
             if control is not None:
                 control_gamepad(self.j, control)
@@ -113,6 +114,32 @@ class TM2020Interface(RealTimeGymInterface):
                 elif control[2] < -0.5:
                     actions.append('l')
                 apply_control(actions)
+
+    @staticmethod
+    def _sanitize_control(control):
+        """
+        Converts raw policy outputs into stable driving commands.
+
+        In practice this removes tiny trigger jitter and prevents simultaneous gas+brake,
+        which often causes unnatural start behavior during early training.
+        """
+        if control is None:
+            return None
+        ctrl = np.asarray(control, dtype=np.float32).reshape(-1)
+        if ctrl.shape[0] < 3:
+            return None
+
+        gas = float(np.clip(ctrl[0], -1.0, 1.0))
+        brake = float(np.clip(ctrl[1], -1.0, 1.0))
+        steer = float(np.clip(ctrl[2], -1.0, 1.0))
+
+        gas = gas if gas > 0.05 else 0.0
+        brake = brake if brake > 0.10 else 0.0
+
+        if gas > 0.0:
+            brake = 0.0
+
+        return np.array([gas, brake, steer], dtype=np.float32)
 
     def grab_data_and_img(self):
         img = self.window_interface.screenshot()[:, :, :3]  # BGR ordering
@@ -236,7 +263,7 @@ class TM2020Interface(RealTimeGymInterface):
         """
         initial action at episode start
         """
-        return np.array([0.0, 0.0, 0.0], dtype='float32')
+        return np.array([0.5, 0.0, 0.0], dtype='float32')
 
 
 class TM2020InterfaceLidar(TM2020Interface):
