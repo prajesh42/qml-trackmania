@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 import torch
 import pickle
 
@@ -66,7 +67,7 @@ class ActorModule(ABC):
         Returns:
             ActorModule: An instance of your ActorModule
         """
-        with open(path, 'wb') as f:
+        with open(path, 'rb') as f:
             res = pickle.load(file=f)
         return res
 
@@ -134,7 +135,52 @@ class TorchActorModule(ActorModule, torch.nn.Module, ABC):
 
     def load(self, path, device):
         self.device = device
-        self.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
+        checkpoint_state = torch.load(path, map_location=self.device, weights_only=True)
+        current_state = self.state_dict()
+        try:
+            self.load_state_dict(checkpoint_state)
+            return self
+        except RuntimeError as err:
+            compatible_state = {}
+            shape_mismatches = []
+            for key, value in checkpoint_state.items():
+                if key not in current_state:
+                    continue
+                if current_state[key].shape == value.shape:
+                    compatible_state[key] = value
+                else:
+                    shape_mismatches.append(key)
+
+            model_size = len(current_state)
+            compatible_count = len(compatible_state)
+            compatibility_ratio = compatible_count / max(1, model_size)
+
+            # If almost everything changed, keep current weights and avoid an incoherent partial load.
+            if compatible_count == 0 or compatibility_ratio < 0.5:
+                logging.warning(
+                    "Ignoring incompatible checkpoint at %s (%d/%d matching tensors). "
+                    "Keeping current model weights. Original load error: %s",
+                    path,
+                    compatible_count,
+                    model_size,
+                    err,
+                )
+                return self
+
+            merged_state = dict(current_state)
+            merged_state.update(compatible_state)
+            load_info = self.load_state_dict(merged_state, strict=False)
+            logging.warning(
+                "Partially loaded checkpoint at %s (%d/%d matching tensors). "
+                "Missing keys kept initialized: %d. Unexpected keys ignored: %d.",
+                path,
+                compatible_count,
+                model_size,
+                len(load_info.missing_keys),
+                len(load_info.unexpected_keys),
+            )
+            if shape_mismatches:
+                logging.warning("Skipped shape-mismatched tensors: %s", ", ".join(sorted(shape_mismatches)))
         return self
 
     def act_(self, obs, test=False):
