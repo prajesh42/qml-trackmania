@@ -133,7 +133,7 @@ class TM2020Interface(RealTimeGymInterface):
         brake = float(np.clip(ctrl[1], -1.0, 1.0))
         steer = float(np.clip(ctrl[2], -1.0, 1.0))
 
-        gas = gas if gas > 0.05 else 0.0
+        gas = gas if gas > 0.02 else 0.0
         brake = brake if brake > 0.10 else 0.0
 
         if gas > 0.0:
