@@ -32,7 +32,10 @@ def _combined_obs_dim(observation_space):
 
 def _flatten_obs(obs, tuple_obs):
     if tuple_obs:
-        return torch.cat(obs, -1)
+        return torch.cat(
+            [torch.flatten(o, start_dim=1) for o in obs],
+            dim=-1,
+        )
     return torch.flatten(obs, start_dim=1)
 
 
@@ -238,37 +241,62 @@ class AerQuantumLayer(nn.Module):
     def __init__(self, n_qubits=4, n_layers=1):
         super().__init__()
         self.backend = _AerCircuitBackend(n_qubits=n_qubits, n_layers=n_layers)
-        self.weights = nn.Parameter(0.01 * torch.randn(self.backend.n_weights, dtype=torch.float32))
+        self.weights = nn.Parameter(0.05 * torch.randn(self.backend.n_weights, dtype=torch.float32))
 
     def forward(self, input_angles):
         return _AerQuantumFunction.apply(input_angles, self.weights, self.backend)
 
 
-class FixedAngleEncoder(nn.Module):
-    def __init__(self, input_dim, n_qubits, seed=0):
+class TrainableAngleEncoder(nn.Module):
+    def __init__(self, input_dim, n_qubits):
         super().__init__()
-        generator = torch.Generator(device="cpu")
-        generator.manual_seed(int(seed))
-        scale = 1.0 / math.sqrt(max(1, input_dim))
-        projection = torch.randn(input_dim, n_qubits, generator=generator) * scale
-        bias = torch.zeros(n_qubits, dtype=torch.float32)
-        self.register_buffer("projection", projection)
-        self.register_buffer("bias", bias)
+        self.net = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, n_qubits),
+        )
+        self.angle_scale = nn.Parameter(torch.ones(n_qubits, dtype=torch.float32))
 
     def forward(self, x):
-        angles = torch.tanh(x @ self.projection + self.bias) * math.pi
+        raw = self.net(x)
+        angles = torch.tanh(raw) * math.pi * self.angle_scale
         return angles
 
 
 class QuantumFeatureExtractor(nn.Module):
     def __init__(self, input_dim, n_qubits=4, n_layers=1, seed=0):
         super().__init__()
-        self.encoder = FixedAngleEncoder(input_dim=input_dim, n_qubits=n_qubits, seed=seed)
+        self.encoder = TrainableAngleEncoder(input_dim=input_dim, n_qubits=n_qubits)
         self.quantum = AerQuantumLayer(n_qubits=n_qubits, n_layers=n_layers)
 
     def forward(self, x):
         angles = self.encoder(x)
         return self.quantum(angles)
+
+
+class HybridQuantumFeatureExtractor(nn.Module):
+    def __init__(self, input_dim, n_qubits=4, n_layers=1, seed=0):
+        super().__init__()
+        self.classical = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+        )
+        self.quantum = QuantumFeatureExtractor(
+            input_dim=input_dim,
+            n_qubits=n_qubits,
+            n_layers=n_layers,
+            seed=seed,
+        )
+        self.output_dim = 128 + n_qubits
+
+    def forward(self, x):
+        classical_features = self.classical(x)
+        quantum_features = self.quantum(x)
+        return torch.cat([classical_features, quantum_features], dim=-1)
 
 
 class SquashedGaussianQuantumActor(TorchActorModule):
@@ -283,15 +311,15 @@ class SquashedGaussianQuantumActor(TorchActorModule):
         seed = int(alg_cfg.get("QUANTUM_ENCODER_SEED", 0))
 
         dim_act = action_space.shape[0]
-        act_limit = action_space.high[0]
+        act_limit = torch.as_tensor(action_space.high, dtype=torch.float32)
 
-        self.features = QuantumFeatureExtractor(input_dim=obs_dim, n_qubits=n_qubits, n_layers=n_layers, seed=seed)
-        post_sizes = [n_qubits] + list(hidden_sizes)
+        self.features = HybridQuantumFeatureExtractor(input_dim=obs_dim, n_qubits=n_qubits, n_layers=n_layers, seed=seed)
+        post_sizes = [self.features.output_dim] + list(hidden_sizes)
         self.post_net = _mlp(post_sizes, activation, activation)
-        last_dim = hidden_sizes[-1] if len(hidden_sizes) > 0 else n_qubits
+        last_dim = hidden_sizes[-1] if len(hidden_sizes) > 0 else self.features.output_dim
         self.mu_layer = nn.Linear(last_dim, dim_act)
         self.log_std_layer = nn.Linear(last_dim, dim_act)
-        self.act_limit = act_limit
+        self.register_buffer("act_limit", act_limit)
         self._init_action_priors(dim_act)
 
     def _init_action_priors(self, dim_act):
@@ -299,13 +327,13 @@ class SquashedGaussianQuantumActor(TorchActorModule):
             if self.mu_layer.bias is not None:
                 self.mu_layer.bias.zero_()
                 if dim_act >= 1:
-                    self.mu_layer.bias[0] = 1.25  # forward by default
+                    self.mu_layer.bias[0] = 0.5  # forward by default
                 if dim_act >= 2:
-                    self.mu_layer.bias[1] = -2.5  # brake unlikely at start
+                    self.mu_layer.bias[1] = -1.0  # brake unlikely at start
                 if dim_act >= 3:
                     self.mu_layer.bias[2] = 0.0
             if self.log_std_layer.bias is not None:
-                self.log_std_layer.bias.fill_(-1.5)  # smoother early exploration
+                self.log_std_layer.bias.fill_(-0.7)  # smoother early exploration
 
     def forward(self, obs, test=False, with_logprob=True):
         x = _flatten_obs(obs, self.tuple_obs)
@@ -329,7 +357,7 @@ class SquashedGaussianQuantumActor(TorchActorModule):
             logp_pi = None
 
         pi_action = torch.tanh(pi_action)
-        pi_action = self.act_limit * pi_action
+        pi_action = self.act_limit.to(pi_action.device) * pi_action
 
         return pi_action, logp_pi
 
@@ -366,12 +394,39 @@ class QuantumQFunction(nn.Module):
         return torch.squeeze(q, -1)
 
 
+class ClassicalQFunction(nn.Module):
+    def __init__(self, observation_space, action_space, hidden_sizes=(256, 256), activation=nn.ReLU):
+        super().__init__()
+        obs_dim, tuple_obs = _combined_obs_dim(observation_space)
+        self.tuple_obs = tuple_obs
+        act_dim = action_space.shape[0]
+        self.q = _mlp(
+            [obs_dim + act_dim] + list(hidden_sizes) + [1],
+            activation,
+            nn.Identity,
+        )
+
+    def forward(self, obs, act):
+        obs_flat = _flatten_obs(obs, self.tuple_obs)
+        x = torch.cat([obs_flat, act], dim=-1)
+        q = self.q(x)
+        return torch.squeeze(q, -1)
+
+
 class QuantumActorCritic(nn.Module):
     def __init__(self, observation_space, action_space, hidden_sizes=(256, 256), activation=nn.ReLU):
         super().__init__()
         self.actor = SquashedGaussianQuantumActor(observation_space, action_space, hidden_sizes, activation)
-        self.q1 = QuantumQFunction(observation_space, action_space, hidden_sizes, activation)
-        self.q2 = QuantumQFunction(observation_space, action_space, hidden_sizes, activation)
+        self.q1 = ClassicalQFunction(observation_space, action_space, hidden_sizes, activation)
+        self.q2 = ClassicalQFunction(observation_space, action_space, hidden_sizes, activation)
+
+    def log_quantum_stats(self):
+        for name, param in self.named_parameters():
+            if "quantum.weights" in name:
+                grad_norm = None if param.grad is None else param.grad.norm().item()
+                logging.info(
+                    f"{name}: weight_norm={param.data.norm().item():.6f}, grad_norm={grad_norm}"
+                )
 
     def act(self, obs, test=False):
         with torch.no_grad():
