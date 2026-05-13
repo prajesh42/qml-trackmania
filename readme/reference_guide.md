@@ -26,6 +26,10 @@ All parameters are described below.
   "RW_MAX_SAMPLES_PER_EPISODE": 1000,  // tmrl forces truncation if the episode is longer than this
   "CUDA_TRAINING": true,  //  if true, training happens on GPU (Trainer)
   "CUDA_INFERENCE": false,  // if true, inference happens on GPU (RolloutWorker)
+  "CUDA_DEVICE": "cuda",  // torch CUDA device, e.g. "cuda" or "cuda:0"
+  "CUDA_MIN_FREE_MEMORY_MB": 0,  // trainer falls back to CPU below this estimated free VRAM
+  "CUDA_LOW_MEMORY_MODE": "AUTO",  // caps BATCH_SIZE automatically on small CUDA cards
+  "CUDA_LOW_MEMORY_BATCH_SIZE": 64,  // cap used when low-memory CUDA mode is active
   "VIRTUAL_GAMEPAD": true,  // if true, the example TrackMania pipeline uses vgamepad
   "LOCALHOST_WORKER": true,  // must be false when the Server is not on localhost
   "LOCALHOST_TRAINER": true,  // must be false when the Server is not on localhost
@@ -60,6 +64,11 @@ All parameters are described below.
     "LR_ACTOR":0.00001,  // learning rate of the actor
     "LR_CRITIC":0.00005,  // learning rate of the critic
     "LR_ENTROPY":0.0003,  // learning rate of the entropy factor (SACv2)
+    "HIDDEN_SIZES": [256, 256],  // actor/critic MLP hidden sizes; [128, 128] or [64, 64] are faster on old GPUs
+    "ACTOR_INITIAL_GAS_BIAS": 0.0,  // positive values bias early SAC exploration toward throttle
+    "ACTOR_INITIAL_BRAKE_BIAS": -1.0,  // negative values make early braking less likely
+    "ACTOR_INITIAL_STEER_BIAS": 0.0,  // initial steering bias
+    "ACTOR_INITIAL_LOG_STD_BIAS": null,  // optional initial exploration std bias; -0.7 is smoother
     "GAMMA":0.995,  // discount factor
     "POLYAK":0.995,  // polyak averaging factor of the target critic
     "TARGET_ENTROPY":-0.5,  // entropy (SACv2)
@@ -67,6 +76,7 @@ All parameters are described below.
     "REDQ_N":10,  // number of critic networks (REDQSAC)
     "REDQ_M":2,  // random subset size (REDQSAC)
     "REDQ_Q_UPDATES_PER_POLICY_UPDATE":20,  // (for REDQSAC)
+    "QUANTUM_AER_DEVICE": "AUTO",  // "AUTO", "CPU", or "GPU"; AUTO avoids Aer GPU in low-memory CUDA mode
     "QUANTUM_N_QUBITS": 4,  // number of qubits in the Aer circuit (QSAC)
     "QUANTUM_N_LAYERS": 1,  // number of variational circuit layers (QSAC)
     "QUANTUM_ENCODER_SEED": 0,  // seed for the fixed classical-to-angle projection (QSAC)
@@ -112,6 +122,16 @@ All parameters are described below.
 
 
 ## Command line interface
+
+### Fast low-memory LIDAR preset:
+
+For a low-memory CUDA card such as a GeForce 940M, apply a SAC LIDAR preset with a smaller MLP, batch size 64, CPU rollout inference, and progress observations:
+
+```bash
+python -m tmrl.tools.apply_fast_lidar_preset --reset-training
+```
+
+This backs up `config.json` before editing it.
 
 ### General:
 

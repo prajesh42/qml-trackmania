@@ -49,9 +49,40 @@ LOG_STD_MIN = -20
 EPSILON = 1e-7
 
 
+def _configured_hidden_sizes(default=(256, 256)):
+    raw = cfg.TMRL_CONFIG.get("ALG", {}).get("HIDDEN_SIZES", default)
+    if isinstance(raw, int):
+        sizes = (raw,)
+    else:
+        sizes = tuple(int(size) for size in raw)
+    if len(sizes) == 0 or any(size <= 0 for size in sizes):
+        raise ValueError(f"ALG.HIDDEN_SIZES must contain positive integers, got {raw!r}")
+    return sizes
+
+
+def _init_sac_action_priors(mu_layer, log_std_layer, dim_act):
+    alg_cfg = cfg.TMRL_CONFIG.get("ALG", {})
+    gas_bias = float(alg_cfg.get("ACTOR_INITIAL_GAS_BIAS", 0.0))
+    brake_bias = float(alg_cfg.get("ACTOR_INITIAL_BRAKE_BIAS", -1.0))
+    steer_bias = float(alg_cfg.get("ACTOR_INITIAL_STEER_BIAS", 0.0))
+    log_std_bias = alg_cfg.get("ACTOR_INITIAL_LOG_STD_BIAS", None)
+
+    with torch.no_grad():
+        if mu_layer.bias is not None:
+            if dim_act >= 1:
+                mu_layer.bias[0] = gas_bias
+            if dim_act >= 2:
+                mu_layer.bias[1] = brake_bias
+            if dim_act >= 3:
+                mu_layer.bias[2] = steer_bias
+        if log_std_bias is not None and log_std_layer.bias is not None:
+            log_std_layer.bias.fill_(float(log_std_bias))
+
+
 class SquashedGaussianMLPActor(TorchActorModule):
-    def __init__(self, observation_space, action_space, hidden_sizes=(256, 256), activation=nn.ReLU):
+    def __init__(self, observation_space, action_space, hidden_sizes=None, activation=nn.ReLU):
         super().__init__(observation_space, action_space)
+        hidden_sizes = _configured_hidden_sizes() if hidden_sizes is None else tuple(hidden_sizes)
         try:
             dim_obs = sum(prod(s for s in space.shape) for space in observation_space)
             self.tuple_obs = True
@@ -64,6 +95,7 @@ class SquashedGaussianMLPActor(TorchActorModule):
         self.mu_layer = nn.Linear(hidden_sizes[-1], dim_act)
         self.log_std_layer = nn.Linear(hidden_sizes[-1], dim_act)
         self.act_limit = act_limit
+        _init_sac_action_priors(self.mu_layer, self.log_std_layer, dim_act)
 
     def forward(self, obs, test=False, with_logprob=True):
         x = torch.cat(obs, -1) if self.tuple_obs else torch.flatten(obs, start_dim=1)
@@ -109,8 +141,9 @@ class SquashedGaussianMLPActor(TorchActorModule):
 
 
 class MLPQFunction(nn.Module):
-    def __init__(self, obs_space, act_space, hidden_sizes=(256, 256), activation=nn.ReLU):
+    def __init__(self, obs_space, act_space, hidden_sizes=None, activation=nn.ReLU):
         super().__init__()
+        hidden_sizes = _configured_hidden_sizes() if hidden_sizes is None else tuple(hidden_sizes)
         try:
             obs_dim = sum(prod(s for s in space.shape) for space in obs_space)
             self.tuple_obs = True
@@ -127,8 +160,9 @@ class MLPQFunction(nn.Module):
 
 
 class MLPActorCritic(nn.Module):
-    def __init__(self, observation_space, action_space, hidden_sizes=(256, 256), activation=nn.ReLU):
+    def __init__(self, observation_space, action_space, hidden_sizes=None, activation=nn.ReLU):
         super().__init__()
+        hidden_sizes = _configured_hidden_sizes() if hidden_sizes is None else tuple(hidden_sizes)
 
         # obs_dim = observation_space.shape[0]
         # act_dim = action_space.shape[0]
@@ -155,10 +189,11 @@ class REDQMLPActorCritic(nn.Module):
     def __init__(self,
                  observation_space,
                  action_space,
-                 hidden_sizes=(256, 256),
+                 hidden_sizes=None,
                  activation=nn.ReLU,
                  n=10):
         super().__init__()
+        hidden_sizes = _configured_hidden_sizes() if hidden_sizes is None else tuple(hidden_sizes)
 
         # obs_dim = observation_space.shape[0]
         # act_dim = action_space.shape[0]

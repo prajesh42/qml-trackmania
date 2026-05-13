@@ -10,7 +10,48 @@ import torch
 
 from tmrl.config import config_constants as cfg
 from tmrl.util import dump, load
+from tmrl.custom.utils.torch_device import effective_batch_size, resolve_torch_device
 import logging
+
+
+def _configured_training_device():
+    return resolve_torch_device(
+        cfg.CUDA_DEVICE if cfg.CUDA_TRAINING else "cpu",
+        role="checkpoint trainer",
+        min_free_memory_mb=cfg.CUDA_MIN_FREE_MEMORY_MB,
+    )
+
+
+def _configured_batch_size():
+    return effective_batch_size(
+        cfg.TMRL_CONFIG["BATCH_SIZE"],
+        _configured_training_device(),
+        low_memory_mode=cfg.CUDA_LOW_MEMORY_MODE,
+        low_memory_batch_size=cfg.CUDA_LOW_MEMORY_BATCH_SIZE,
+    )
+
+
+def _configured_hidden_sizes():
+    raw = cfg.TMRL_CONFIG.get("ALG", {}).get("HIDDEN_SIZES")
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return (int(raw),)
+    return tuple(int(size) for size in raw)
+
+
+def _actor_hidden_sizes(model):
+    actor = getattr(model, "actor", None)
+    net = getattr(actor, "net", None)
+    if net is None:
+        return None
+    sizes = []
+    for layer in net:
+        if isinstance(layer, torch.nn.Linear):
+            sizes.append(int(layer.out_features))
+    if len(sizes) > 0:
+        return tuple(sizes)
+    return None
 
 
 def load_run_instance_images_dataset(checkpoint_path):
@@ -55,7 +96,7 @@ def dump_run_instance_images_dataset(run_instance, checkpoint_path):
 def update_memory(run_instance):
     steps = cfg.TMRL_CONFIG["TRAINING_STEPS_PER_ROUND"]
     memory_size = cfg.TMRL_CONFIG["MEMORY_SIZE"]
-    batch_size = cfg.TMRL_CONFIG["BATCH_SIZE"]
+    batch_size = _configured_batch_size()
     if run_instance.steps != steps \
             or run_instance.memory.batch_size != batch_size \
             or run_instance.memory.memory_size != memory_size:
@@ -121,6 +162,16 @@ def update_run_instance(run_instance, training_cls):
             f"but config expects {expected_model_cls.__name__} for {ALG_NAME}.",
         )
 
+    expected_hidden_sizes = _configured_hidden_sizes()
+    current_hidden_sizes = _actor_hidden_sizes(current_model)
+    if expected_hidden_sizes is not None and current_hidden_sizes is not None and current_hidden_sizes != expected_hidden_sizes:
+        return _new_run_with_existing_memory(
+            training_cls,
+            run_instance,
+            f"Checkpoint actor hidden sizes are {current_hidden_sizes}, "
+            f"but config expects {expected_hidden_sizes}.",
+        )
+
     if ALG_NAME in ["SAC", "REDQSAC", "QSAC"]:
         lr_actor = ALG_CONFIG["LR_ACTOR"]
         lr_critic = ALG_CONFIG["LR_CRITIC"]
@@ -150,7 +201,11 @@ def update_run_instance(run_instance, training_cls):
         if run_instance.agent.lr_entropy != lr_entropy or run_instance.agent.alpha != alpha:
             run_instance.agent.lr_entropy = lr_entropy
             run_instance.agent.alpha = alpha
-            device = run_instance.device or ("cuda" if torch.cuda.is_available() else "cpu")
+            device = resolve_torch_device(
+                run_instance.device,
+                role="checkpoint entropy tensors",
+                min_free_memory_mb=cfg.CUDA_MIN_FREE_MEMORY_MB,
+            )
             if run_instance.agent.learn_entropy_coef:
                 run_instance.agent.log_alpha = torch.log(torch.ones(1) * run_instance.agent.alpha).to(device).requires_grad_(True)
                 run_instance.agent.alpha_optimizer = Adam([run_instance.agent.log_alpha], lr=lr_entropy)
