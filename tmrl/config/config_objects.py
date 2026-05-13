@@ -15,12 +15,29 @@ from tmrl.custom.custom_models import SquashedGaussianMLPActor, MLPActorCritic, 
 from tmrl.custom.custom_algorithms import SpinupSacAgent as SAC_Agent
 from tmrl.custom.custom_algorithms import REDQSACAgent as REDQ_Agent
 from tmrl.custom.custom_checkpoints import update_run_instance
+from tmrl.custom.utils.torch_device import effective_batch_size, resolve_torch_device
 from tmrl.util import partial
 
 
 ALG_CONFIG = cfg.TMRL_CONFIG["ALG"]
 ALG_NAME = ALG_CONFIG["ALGORITHM"]
 assert ALG_NAME in ["SAC", "REDQSAC", "QSAC"], f"If you wish to implement {ALG_NAME}, do not use 'ALG' in config.json for that."
+
+TRAINING_DEVICE = resolve_torch_device(
+    cfg.CUDA_DEVICE if cfg.CUDA_TRAINING else "cpu",
+    role="trainer",
+    min_free_memory_mb=cfg.CUDA_MIN_FREE_MEMORY_MB,
+)
+INFERENCE_DEVICE = resolve_torch_device(
+    cfg.CUDA_DEVICE if cfg.CUDA_INFERENCE else "cpu",
+    role="rollout worker",
+)
+TRAINING_BATCH_SIZE = effective_batch_size(
+    cfg.TMRL_CONFIG["BATCH_SIZE"],
+    TRAINING_DEVICE,
+    low_memory_mode=cfg.CUDA_LOW_MEMORY_MODE,
+    low_memory_batch_size=cfg.CUDA_LOW_MEMORY_BATCH_SIZE,
+)
 
 
 # MODEL, GYM ENVIRONMENT, REPLAY MEMORY AND TRAINING: ===========
@@ -107,7 +124,7 @@ else:
 
 MEMORY = partial(MEM,
                  memory_size=cfg.TMRL_CONFIG["MEMORY_SIZE"],
-                 batch_size=cfg.TMRL_CONFIG["BATCH_SIZE"],
+                 batch_size=TRAINING_BATCH_SIZE,
                  sample_preprocessor=SAMPLE_PREPROCESSOR,
                  dataset_path=cfg.DATASET_PATH,
                  imgs_obs=cfg.IMG_HIST_LEN,
@@ -119,7 +136,7 @@ MEMORY = partial(MEM,
 if ALG_NAME in ["SAC", "QSAC"]:
     AGENT = partial(
         SAC_Agent,
-        device='cuda' if cfg.CUDA_TRAINING else 'cpu',
+        device=TRAINING_DEVICE,
         model_cls=TRAIN_MODEL,
         lr_actor=ALG_CONFIG["LR_ACTOR"],
         lr_critic=ALG_CONFIG["LR_CRITIC"],
@@ -139,7 +156,7 @@ if ALG_NAME in ["SAC", "QSAC"]:
 else:
     AGENT = partial(
         REDQ_Agent,
-        device='cuda' if cfg.CUDA_TRAINING else 'cpu',
+        device=TRAINING_DEVICE,
         model_cls=TRAIN_MODEL,
         lr_actor=ALG_CONFIG["LR_ACTOR"],
         lr_critic=ALG_CONFIG["LR_CRITIC"],
@@ -181,6 +198,7 @@ if cfg.PRAGMA_LIDAR:  # lidar
         profiling=cfg.PROFILE_TRAINER,
         training_agent_cls=AGENT,
         agent_scheduler=None,  # sac_v2_entropy_scheduler
+        device=TRAINING_DEVICE,
         start_training=cfg.TMRL_CONFIG["ENVIRONMENT_STEPS_BEFORE_TRAINING"])  # set this > 0 to start from an existing policy (fills the buffer up to this number of samples before starting training)
 else:  # images
     TRAINER = partial(
@@ -196,6 +214,7 @@ else:  # images
         profiling=cfg.PROFILE_TRAINER,
         training_agent_cls=AGENT,
         agent_scheduler=None,  # sac_v2_entropy_scheduler
+        device=TRAINING_DEVICE,
         start_training=cfg.TMRL_CONFIG["ENVIRONMENT_STEPS_BEFORE_TRAINING"])
 
 # CHECKPOINTS: ===================================================

@@ -49,6 +49,10 @@ PRAGMA_RNN = False  # True to use an RNN, False to use an MLP
 
 CUDA_TRAINING = TMRL_CONFIG["CUDA_TRAINING"]  # True if CUDA, False if CPU (trainer)
 CUDA_INFERENCE = TMRL_CONFIG["CUDA_INFERENCE"]  # True if CUDA, False if CPU (rollout worker)
+CUDA_DEVICE = TMRL_CONFIG.get("CUDA_DEVICE", "cuda")  # Torch CUDA device, e.g. "cuda" or "cuda:0"
+CUDA_MIN_FREE_MEMORY_MB = TMRL_CONFIG.get("CUDA_MIN_FREE_MEMORY_MB", 0)  # trainer falls back to CPU below this
+CUDA_LOW_MEMORY_MODE = TMRL_CONFIG.get("CUDA_LOW_MEMORY_MODE", "AUTO")  # AUTO/true/false; caps BATCH_SIZE on small GPUs
+CUDA_LOW_MEMORY_BATCH_SIZE = TMRL_CONFIG.get("CUDA_LOW_MEMORY_BATCH_SIZE", 64)
 
 PRAGMA_GAMEPAD = TMRL_CONFIG["VIRTUAL_GAMEPAD"]  # True to use gamepad, False to use keyboard
 

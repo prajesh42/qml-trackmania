@@ -11,6 +11,7 @@ from torch.optim import Adam, AdamW, SGD
 # local imports
 import tmrl.custom.custom_models as core
 from tmrl.custom.utils.nn import copy_shared, no_grad
+from tmrl.custom.utils.torch_device import resolve_torch_device
 from tmrl.util import cached_property
 from tmrl.training import TrainingAgent
 import tmrl.config.config_constants as cfg
@@ -72,7 +73,11 @@ class SpinupSacAgent(TrainingAgent):  # Adapted from Spinup
     def __post_init__(self):
         observation_space, action_space = self.observation_space, self.action_space
         requested_device = self.device
-        device = requested_device or ("cuda" if torch.cuda.is_available() else "cpu")
+        device = resolve_torch_device(
+            requested_device,
+            role="SAC trainer",
+            min_free_memory_mb=cfg.CUDA_MIN_FREE_MEMORY_MB,
+        )
         self.device = device
         model = self.model_cls(observation_space, action_space)
         _log_resolved_torch_device("SAC", requested_device=requested_device, resolved_device=device)
@@ -345,7 +350,11 @@ class REDQSACAgent(TrainingAgent):
     def __post_init__(self):
         observation_space, action_space = self.observation_space, self.action_space
         requested_device = self.device
-        device = requested_device or ("cuda" if torch.cuda.is_available() else "cpu")
+        device = resolve_torch_device(
+            requested_device,
+            role="REDQ-SAC trainer",
+            min_free_memory_mb=cfg.CUDA_MIN_FREE_MEMORY_MB,
+        )
         self.device = device
         model = self.model_cls(observation_space, action_space)
         _log_resolved_torch_device("REDQ-SAC", requested_device=requested_device, resolved_device=device)

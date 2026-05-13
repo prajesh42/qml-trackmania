@@ -12,6 +12,7 @@ from torch.distributions.normal import Normal
 
 import tmrl.config.config_constants as cfg
 from tmrl.actor import TorchActorModule
+from tmrl.custom.utils.torch_device import is_low_memory_cuda
 from tmrl.util import prod
 
 
@@ -135,6 +136,17 @@ class _AerCircuitBackend:
             logging.warning("QUANTUM_AER_DEVICE='GPU' requested but GPU is unavailable in this Aer build.")
             return "CPU"
         # AUTO mode
+        if (
+            cfg.CUDA_TRAINING
+            and "GPU" in available_devices
+            and str(cfg.CUDA_LOW_MEMORY_MODE).strip().upper() == "AUTO"
+            and is_low_memory_cuda(cfg.CUDA_DEVICE)
+        ):
+            logging.warning(
+                "QUANTUM_AER_DEVICE='AUTO' selected CPU because CUDA low-memory mode is active. "
+                "Set ALG.QUANTUM_AER_DEVICE='GPU' to force Aer GPU."
+            )
+            return "CPU"
         return "GPU" if "GPU" in available_devices else "CPU"
 
     @staticmethod

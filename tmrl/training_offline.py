@@ -8,6 +8,7 @@ from pandas import DataFrame
 
 # local imports
 from tmrl.util import pandas_dict
+from tmrl.custom.utils.torch_device import resolve_torch_device
 
 import logging
 
@@ -202,7 +203,7 @@ class TorchTrainingOffline(TrainingOffline):
             start_training (int): minimum number of samples in the replay buffer before starting training
             device (str): device on which the memory will collate training samples (None for automatic)
         """
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        device = resolve_torch_device(device, role="offline trainer")
         super().__init__(env_cls,
                          memory_cls,
                          training_agent_cls,
