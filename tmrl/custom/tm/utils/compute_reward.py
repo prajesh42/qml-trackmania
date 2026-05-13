@@ -88,6 +88,29 @@ class RewardFunction:
         # The reward is then proportional to the number of passed indexes (i.e., track distance):
         reward = (best_index - self.cur_idx) / 100.0
 
+        if min_dist > self.max_dist_from_traj:
+            reward -= 1.0  # Strong penalty for deviating from the track
+        elif best_index == self.cur_idx:
+            reward -= 0.5  # Penalty for not progressing
+        else:
+            reward += 1.0  # Reward for progressing in the correct direction
+
+        # Penalty for wall collisions
+        if collision:
+            reward -= 2.0  # Strong penalty for collisions
+
+        # Penalty for steering oscillations
+        steering_change = abs(current_steering - previous_steering)
+        reward -= 0.05 * steering_change
+
+        # Penalty for large lateral velocity
+        lateral_velocity = abs(current_velocity[1])  # Assuming velocity[1] is lateral
+        reward -= 0.1 * lateral_velocity
+
+        # Reward for staying near the centerline
+        centerline_deviation = abs(current_position - centerline_position)
+        reward -= 0.1 * centerline_deviation
+
         if best_index == self.cur_idx:  # if the best index didn't change, we rewind (more Markovian reward)
             min_dist = np.inf
             index = self.cur_idx
