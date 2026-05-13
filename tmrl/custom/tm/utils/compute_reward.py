@@ -11,148 +11,250 @@ class RewardFunction:
     """
     Computes a reward from the Openplanet API for Trackmania 2020.
     """
-    def __init__(self,
-                 reward_data_path,
-                 nb_obs_forward=10,
-                 nb_obs_backward=10,
-                 nb_zero_rew_before_failure=10,
-                 min_nb_steps_before_failure=int(3.5 * 20),
-                 max_dist_from_traj=60.0):
+
+    def __init__(
+        self,
+        reward_data_path,
+        nb_obs_forward=10,
+        nb_obs_backward=10,
+        nb_zero_rew_before_failure=30,
+        min_nb_steps_before_failure=int(3.5 * 20),
+        max_dist_from_traj=60.0,
+    ):
         """
         Instantiates a reward function for TM2020.
 
         Args:
             reward_data_path: path where the trajectory file is stored
-            nb_obs_forward: max distance of allowed cuts (as a number of positions in the trajectory)
-            nb_obs_backward: same thing but for when rewinding the reward to a previously visited position
-            nb_zero_rew_before_failure: after this number of steps with no reward, episode is terminated
-            min_nb_steps_before_failure: the episode must have at least this number of steps before failure
-            max_dist_from_traj: the reward is 0 if the car is further than this distance from the demo trajectory
+            nb_obs_forward: max distance of allowed cuts
+            nb_obs_backward: rewind distance in trajectory
+            nb_zero_rew_before_failure:
+                number of steps with no progress before termination
+            min_nb_steps_before_failure:
+                minimum episode length before failure logic activates
+            max_dist_from_traj:
+                maximum allowed distance from demo trajectory
         """
+
         if not os.path.exists(reward_data_path):
-            logging.error(f"Reward data not found at path: {reward_data_path}. Using dummy reward.")
-            self.data = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+            logging.error(
+                f"Reward data not found at path: {reward_data_path}. Using dummy reward."
+            )
+            self.data = np.array(
+                [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]
+            )
         else:
-            with open(reward_data_path, 'rb') as f:
+            with open(reward_data_path, "rb") as f:
                 try:
                     self.data = pickle.load(f)
                 except Exception as e:
-                    logging.error(f"Failed to load reward data: {e}. Using dummy reward.")
-                    self.data = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+                    logging.error(
+                        f"Failed to load reward data: {e}. Using dummy reward."
+                    )
+                    self.data = np.array(
+                        [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]
+                    )
 
         self.cur_idx = 0
         self.nb_obs_forward = nb_obs_forward
         self.nb_obs_backward = nb_obs_backward
-        self.nb_zero_rew_before_failure = max(5, nb_zero_rew_before_failure)
-        self.min_nb_steps_before_failure = min_nb_steps_before_failure
-        self.max_dist_from_traj = max_dist_from_traj if max_dist_from_traj > 0 else 100.0
+        self.nb_zero_rew_before_failure = max(
+            5,
+            nb_zero_rew_before_failure,
+        )
+        self.min_nb_steps_before_failure = (
+            min_nb_steps_before_failure
+        )
+        self.max_dist_from_traj = (
+            max_dist_from_traj
+            if max_dist_from_traj > 0
+            else 100.0
+        )
+
         self.step_counter = 0
         self.failure_counter = 0
         self.datalen = len(self.data)
 
-        # self.traj = []
+        # used for steering smoothness reward
+        self.prev_steer = 0.0
 
-    def compute_reward(self, pos):
+        # used for speed impact penalty
+        self.prev_speed = 0.0
+
+    def compute_reward(
+        self,
+        pos,
+        steer=0.0,
+        speed=0.0,
+        collision=False,
+    ):
         """
-        Computes the current reward given the position pos
+        Computes reward.
+
         Args:
-            pos: the current position
+            pos:
+                current car position
+
+            steer:
+                current steering action
+                expected range: [-1, 1]
+
+            speed:
+                current speed
+
+            collision:
+                bool indicating wall collision
+
         Returns:
-            float, bool: the reward and the terminated signal
+            reward, terminated
         """
-        # self.traj.append(pos)
 
         terminated = False
-        self.step_counter += 1  # step counter to enable failure counter
-        min_dist = np.inf  # smallest distance found so far in the trajectory to the target pos
-        index = self.cur_idx  # cur_idx is where we were last step in the trajectory
-        temp = self.nb_obs_forward  # counter used to find cuts
-        best_index = 0  # index best matching the target pos
 
+        self.step_counter += 1
+
+        min_dist = np.inf
+        index = self.cur_idx
+        temp = self.nb_obs_forward
+        best_index = self.cur_idx
+
+        # forward search in trajectory
         while True:
-            dist = np.linalg.norm(pos - self.data[index])  # distance of the current index to target pos
-            if dist <= min_dist:  # if dist is smaller than our minimum found distance so far,
-                min_dist = dist  # then we found a new best distance,
-                best_index = index  # and a new best index
-                temp = self.nb_obs_forward  # we will have to check this number of positions to find a possible cut
-            index += 1  # now we will evaluate the next index in the trajectory
-            temp -= 1  # so we can decrease the counter for cuts
-            # stop condition
-            if index >= self.datalen or temp <= 0:  # if trajectory complete or cuts counter depleted
-                # We check that we are not too far from the demo trajectory:
+
+            dist = np.linalg.norm(
+                pos - self.data[index]
+            )
+
+            if dist <= min_dist:
+                min_dist = dist
+                best_index = index
+                temp = self.nb_obs_forward
+
+            index += 1
+            temp -= 1
+
+            if (
+                index >= self.datalen
+                or temp <= 0
+            ):
+
+                # hard cutoff if extremely far
                 if min_dist > self.max_dist_from_traj:
-                    best_index = self.cur_idx  # if so, consider we didn't move
+                    best_index = self.cur_idx
 
-                break  # we found the best index and can break the while loop
+                break
 
-        # The reward is then proportional to the number of passed indexes (i.e., track distance):
-        reward = (best_index - self.cur_idx) / 100.0
+        # ==========================================================
+        # BASE PROGRESS REWARD
+        # ==========================================================
 
-        if min_dist > self.max_dist_from_traj:
-            reward -= 1.0  # Strong penalty for deviating from the track
-        elif best_index == self.cur_idx:
-            reward -= 0.5  # Penalty for not progressing
-        else:
-            reward += 1.0  # Reward for progressing in the correct direction
+        progress = (
+            best_index - self.cur_idx
+        ) / 100.0
 
-        # Penalty for wall collisions
+        reward = progress
+
+        # ==========================================================
+        # CENTERLINE / TRAJECTORY DISTANCE PENALTY
+        # ==========================================================
+
+        # smooth continuous penalty
+        reward -= 0.002 * min_dist
+
+        # slightly stronger nonlinear penalty
+        reward -= 0.0005 * (min_dist ** 1.2)
+
+        # ==========================================================
+        # STEERING SMOOTHNESS PENALTY
+        # ==========================================================
+
+        steer_change = abs(
+            steer - self.prev_steer
+        )
+
+        reward -= 0.01 * steer_change
+
+        self.prev_steer = steer
+
+        # ==========================================================
+        # SPEED DROP PENALTY
+        # ==========================================================
+
+        speed_drop = max(
+            0.0,
+            self.prev_speed - speed,
+        )
+
+        reward -= 0.002 * speed_drop
+
+        self.prev_speed = speed
+
+        # ==========================================================
+        # COLLISION PENALTY
+        # ==========================================================
+
         if collision:
-            reward -= 2.0  # Strong penalty for collisions
+            reward -= 1.5
 
-        # Penalty for steering oscillations
-        steering_change = abs(current_steering - previous_steering)
-        reward -= 0.05 * steering_change
+        # ==========================================================
+        # REWIND LOGIC
+        # ==========================================================
 
-        # Penalty for large lateral velocity
-        lateral_velocity = abs(current_velocity[1])  # Assuming velocity[1] is lateral
-        reward -= 0.1 * lateral_velocity
+        if best_index == self.cur_idx:
 
-        # Reward for staying near the centerline
-        centerline_deviation = abs(current_position - centerline_position)
-        reward -= 0.1 * centerline_deviation
-
-        if best_index == self.cur_idx:  # if the best index didn't change, we rewind (more Markovian reward)
             min_dist = np.inf
             index = self.cur_idx
 
-            # Find the best matching index in rewind:
             while True:
-                dist = np.linalg.norm(pos - self.data[index])
+
+                dist = np.linalg.norm(
+                    pos - self.data[index]
+                )
+
                 if dist <= min_dist:
                     min_dist = dist
                     best_index = index
                     temp = self.nb_obs_backward
+
                 index -= 1
                 temp -= 1
-                # stop condition
-                if index <= 0 or temp <= 0:
+
+                if (
+                    index <= 0
+                    or temp <= 0
+                ):
                     break
 
-            # If failure happens for too many steps, the episode terminates
-            if self.step_counter > self.min_nb_steps_before_failure:
+            # failure logic
+            if (
+                self.step_counter
+                > self.min_nb_steps_before_failure
+            ):
+
                 self.failure_counter += 1
-                if self.failure_counter > self.nb_zero_rew_before_failure:
+
+                if (
+                    self.failure_counter
+                    > self.nb_zero_rew_before_failure
+                ):
                     terminated = True
 
-        else:  # if we did progress on the track
-            self.failure_counter = 0  # we reset the counter triggering episode termination
+        else:
+            self.failure_counter = 0
 
-        self.cur_idx = best_index  # finally, we save our new best matching index
+        # update trajectory index
+        self.cur_idx = best_index
 
         return reward, terminated
 
     def reset(self):
         """
-        Resets the reward function for a new episode.
+        Resets reward function.
         """
-        # from pathlib import Path
-        # import pickle as pkl
-        # path_traj = Path.home() / 'TmrlData' / 'reward' / 'traj.pkl'
-        # with open(path_traj, 'wb') as file_traj:
-        #     pkl.dump(self.traj, file_traj)
 
         self.cur_idx = 0
         self.step_counter = 0
         self.failure_counter = 0
 
-        # self.traj = []
+        self.prev_steer = 0.0
+        self.prev_speed = 0.0
