@@ -103,9 +103,9 @@ def update_run_instance(run_instance, training_cls):
         if ALG_NAME in ["SAC", "QSAC"]:
             if run_instance.agent.lr_actor != lr_actor:
                 old = run_instance.agent.lr_actor
-                run_instance.agent.lr_actor = lr_actor
-                run_instance.agent.pi_optimizer = Adam(run_instance.agent.model.actor.parameters(), lr=lr_actor)
-                logging.info(f"Actor optimizer reinitialized with new lr: {lr_actor} (old lr: {old}).")
+                run_instance.agent.lr_actor = lr_actor * 0.5  # Adjusted learning rate for hybrid setup
+                run_instance.agent.pi_optimizer = Adam(run_instance.agent.model.actor.parameters(), lr=run_instance.agent.lr_actor)
+                logging.info(f"Actor optimizer reinitialized with new lr: {run_instance.agent.lr_actor} (old lr: {old}).")
 
             if run_instance.agent.lr_critic != lr_critic:
                 old = run_instance.agent.lr_critic

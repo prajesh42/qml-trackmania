@@ -3,6 +3,7 @@ from dataclasses import InitVar, dataclass
 
 # third-party imports
 import gymnasium
+import logging
 
 # local imports
 from tmrl.wrappers import (AffineObservationWrapper, Float64ToFloat32)
@@ -24,7 +25,11 @@ class GenericGymEnv(gymnasium.Wrapper):
         """
         if gym_kwargs is None:
             gym_kwargs = {}
+        logging.info(f"Initializing environment with ID: {id}")
         env = gymnasium.make(id, **gym_kwargs, disable_env_checker=True)
+        if not isinstance(obs_scale, (int, float)) or obs_scale < 0:
+            logging.warning("Invalid obs_scale value. Defaulting to 0.")
+            obs_scale = 0.
         if obs_scale:
             env = AffineObservationWrapper(env, 0, obs_scale)
         if to_float32:

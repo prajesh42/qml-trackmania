@@ -11,6 +11,10 @@ def obs_preprocessor_tm_act_in_obs(obs):
     Preprocessor for TM2020 full environment with grayscale images
     """
     grayscale_images = obs[3]
+    if not isinstance(grayscale_images, np.ndarray):
+        logging.error("Grayscale images are not a valid numpy array. Check observation format.")
+        return obs
+
     grayscale_images = grayscale_images.astype(np.float32) / 256.0
     obs = (obs[0] / 1000.0, obs[1] / 10.0, obs[2] / 10000.0, grayscale_images, *obs[4:])  # >= 1 action
     return obs

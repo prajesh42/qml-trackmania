@@ -30,18 +30,22 @@ class RewardFunction:
             max_dist_from_traj: the reward is 0 if the car is further than this distance from the demo trajectory
         """
         if not os.path.exists(reward_data_path):
-            logging.debug(f" reward not found at path:{reward_data_path}")
-            self.data = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])  # dummy reward
+            logging.error(f"Reward data not found at path: {reward_data_path}. Using dummy reward.")
+            self.data = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
         else:
             with open(reward_data_path, 'rb') as f:
-                self.data = pickle.load(f)
+                try:
+                    self.data = pickle.load(f)
+                except Exception as e:
+                    logging.error(f"Failed to load reward data: {e}. Using dummy reward.")
+                    self.data = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
 
         self.cur_idx = 0
         self.nb_obs_forward = nb_obs_forward
         self.nb_obs_backward = nb_obs_backward
-        self.nb_zero_rew_before_failure = nb_zero_rew_before_failure
+        self.nb_zero_rew_before_failure = max(5, nb_zero_rew_before_failure)
         self.min_nb_steps_before_failure = min_nb_steps_before_failure
-        self.max_dist_from_traj = max_dist_from_traj
+        self.max_dist_from_traj = max_dist_from_traj if max_dist_from_traj > 0 else 100.0
         self.step_counter = 0
         self.failure_counter = 0
         self.datalen = len(self.data)

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 
 
 class TrainingAgent(ABC):
@@ -32,6 +33,8 @@ class TrainingAgent(ABC):
         Returns:
             dict: a dictionary containing one entry per metric you wish to log (e.g. for wandb)
         """
+        logging.info("Training step started.")
+        logging.debug(f"Batch data: {batch}")
         raise NotImplementedError
 
     @abstractmethod

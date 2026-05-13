@@ -50,7 +50,7 @@ def _mlp(sizes, activation, output_activation=nn.Identity):
 class _AerCircuitBackend:
     _capability_logged = False
 
-    def __init__(self, n_qubits=4, n_layers=1):
+    def __init__(self, n_qubits=2, n_layers=1):
         if n_qubits < 1:
             raise ValueError("n_qubits must be >= 1")
         if n_layers < 1:
@@ -238,7 +238,7 @@ class _AerQuantumFunction(torch.autograd.Function):
 
 
 class AerQuantumLayer(nn.Module):
-    def __init__(self, n_qubits=4, n_layers=1):
+    def __init__(self, n_qubits=2, n_layers=1):
         super().__init__()
         self.backend = _AerCircuitBackend(n_qubits=n_qubits, n_layers=n_layers)
         self.weights = nn.Parameter(0.05 * torch.randn(self.backend.n_weights, dtype=torch.float32))
@@ -265,7 +265,7 @@ class TrainableAngleEncoder(nn.Module):
 
 
 class QuantumFeatureExtractor(nn.Module):
-    def __init__(self, input_dim, n_qubits=4, n_layers=1, seed=0):
+    def __init__(self, input_dim, n_qubits=2, n_layers=1, seed=0):
         super().__init__()
         self.encoder = TrainableAngleEncoder(input_dim=input_dim, n_qubits=n_qubits)
         self.quantum = AerQuantumLayer(n_qubits=n_qubits, n_layers=n_layers)
@@ -276,7 +276,7 @@ class QuantumFeatureExtractor(nn.Module):
 
 
 class HybridQuantumFeatureExtractor(nn.Module):
-    def __init__(self, input_dim, n_qubits=4, n_layers=1, seed=0):
+    def __init__(self, input_dim, n_qubits=2, n_layers=1, seed=0):
         super().__init__()
         self.classical = nn.Sequential(
             nn.LayerNorm(input_dim),
