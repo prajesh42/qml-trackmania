@@ -2,6 +2,7 @@ import os
 import tarfile
 from pathlib import Path
 import itertools
+import functools
 
 from torch.optim import Adam
 import numpy as np
@@ -66,6 +67,30 @@ def update_memory(run_instance):
     return run_instance
 
 
+def _new_run_with_existing_memory(training_cls, run_instance, reason):
+    logging.warning(
+        "%s Reinitializing trainer agent and keeping replay memory. "
+        "Epoch and update counters are reset for a clean learning curve.",
+        reason,
+    )
+    new_run_instance = training_cls()
+    new_run_instance.memory = run_instance.memory
+    new_run_instance = update_memory(new_run_instance)
+    new_run_instance.total_samples = len(new_run_instance.memory)
+    new_run_instance.total_updates = 0
+    new_run_instance.epoch = 0
+    return new_run_instance
+
+
+def _expected_model_cls(training_cls):
+    if not isinstance(training_cls, functools.partial):
+        return None
+    training_agent_cls = training_cls.keywords.get("training_agent_cls")
+    if not isinstance(training_agent_cls, functools.partial):
+        return None
+    return training_agent_cls.keywords.get("model_cls")
+
+
 def update_run_instance(run_instance, training_cls):
     """
     Updates the checkpoint after loading with compatible values from config.json
@@ -79,16 +104,22 @@ def update_run_instance(run_instance, training_cls):
     """
     # check whether we should start a new experiment entirely and keep only the memory:
     if "RESET_TRAINING" in cfg.TMRL_CONFIG and cfg.TMRL_CONFIG["RESET_TRAINING"]:
-        new_run_instance = training_cls()
-        new_run_instance.memory = run_instance.memory
-        new_run_instance = update_memory(new_run_instance)
-        new_run_instance.total_samples = len(new_run_instance.memory)
-        return new_run_instance
+        return _new_run_with_existing_memory(training_cls, run_instance, "RESET_TRAINING is true.")
 
     # update training Agent:
     ALG_CONFIG = cfg.TMRL_CONFIG["ALG"]
     ALG_NAME = ALG_CONFIG["ALGORITHM"]
     assert ALG_NAME in ["SAC", "REDQSAC", "QSAC"], f"{ALG_NAME} is not supported by this checkpoint updater."
+
+    expected_model_cls = _expected_model_cls(training_cls)
+    current_model = getattr(getattr(run_instance, "agent", None), "model", None)
+    if expected_model_cls is not None and current_model is not None and not isinstance(current_model, expected_model_cls):
+        return _new_run_with_existing_memory(
+            training_cls,
+            run_instance,
+            f"Checkpoint model class is {type(current_model).__name__}, "
+            f"but config expects {expected_model_cls.__name__} for {ALG_NAME}.",
+        )
 
     if ALG_NAME in ["SAC", "REDQSAC", "QSAC"]:
         lr_actor = ALG_CONFIG["LR_ACTOR"]
