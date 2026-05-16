@@ -187,6 +187,7 @@ class QuantumFeatureBackbone(nn.Module):
         qiskit_seed: int = 1234,
         qiskit_fallback_on_error: bool = True,
         qiskit_strict: bool = False,
+        quantum_residual_gain: float = 0.05,
     ):
         super().__init__()
         self.fallback = HybridQuantumFeatureMap(input_dim=input_dim, hidden_dim=hidden_dim, depth=depth)
@@ -243,6 +244,56 @@ class QuantumFeatureBackbone(nn.Module):
         return self.fallback(x)
 
 
+class SACCompatibleQuantumBackbone(nn.Module):
+    """
+    SAC-style MLP with an additive quantum residual.
+
+    This keeps the same high-level feature flow as the SAC MLP while injecting
+    active quantum features into the representation consumed by policy/Q heads.
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 256,
+        depth: int = 2,
+        quantum_backend: str = "fallback",
+        qiskit_num_qubits: int = 6,
+        qiskit_reuploads: int = 1,
+        qiskit_angle_scale: float = float(np.pi),
+        qiskit_seed: int = 1234,
+        qiskit_fallback_on_error: bool = True,
+        qiskit_strict: bool = False,
+        quantum_residual_gain: float = 0.05,
+    ):
+        super().__init__()
+        self.sac_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.quantum = QuantumFeatureBackbone(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            depth=depth,
+            quantum_backend=quantum_backend,
+            qiskit_num_qubits=qiskit_num_qubits,
+            qiskit_reuploads=qiskit_reuploads,
+            qiskit_angle_scale=qiskit_angle_scale,
+            qiskit_seed=qiskit_seed,
+            qiskit_fallback_on_error=qiskit_fallback_on_error,
+            qiskit_strict=qiskit_strict,
+        )
+        self.quantum_residual = nn.Linear(hidden_dim, hidden_dim)
+        self.quantum_residual_gain = float(quantum_residual_gain)
+        with torch.no_grad():
+            nn.init.xavier_uniform_(self.quantum_residual.weight)
+            self.quantum_residual.bias.zero_()
+
+    def forward(self, x):
+        return self.sac_net(x) + self.quantum_residual_gain * self.quantum_residual(self.quantum(x))
+
+
 class QuantumSquashedGaussianMLPActor(TorchActorModule):
     """
     Drop-in replacement for SquashedGaussianMLPActor with a quantum-ready backbone.
@@ -263,6 +314,8 @@ class QuantumSquashedGaussianMLPActor(TorchActorModule):
         forward_bias_init: float = 1.8,
         brake_bias_init: float = -2.0,
         steer_bias_init: float = 0.0,
+        sac_compatible: bool = False,
+        quantum_residual_gain: float = 0.05,
     ):
         super().__init__(observation_space, action_space)
         dim_obs, tuple_obs = _obs_dim_and_mode(observation_space)
@@ -271,7 +324,8 @@ class QuantumSquashedGaussianMLPActor(TorchActorModule):
         dim_act = action_space.shape[0]
         self.act_limit = action_space.high[0]
 
-        self.net = QuantumFeatureBackbone(
+        backbone_cls = SACCompatibleQuantumBackbone if _bool(sac_compatible) else QuantumFeatureBackbone
+        self.net = backbone_cls(
             input_dim=dim_obs,
             hidden_dim=hidden_dim,
             depth=depth,
@@ -282,6 +336,7 @@ class QuantumSquashedGaussianMLPActor(TorchActorModule):
             qiskit_seed=qiskit_seed,
             qiskit_fallback_on_error=qiskit_fallback_on_error,
             qiskit_strict=qiskit_strict,
+            quantum_residual_gain=quantum_residual_gain,
         )
         self.mu_layer = nn.Linear(hidden_dim, dim_act)
         self.log_std_layer = nn.Linear(hidden_dim, dim_act)
@@ -342,12 +397,15 @@ class QuantumMLPQFunction(nn.Module):
         qiskit_seed: int = 1234,
         qiskit_fallback_on_error: bool = True,
         qiskit_strict: bool = False,
+        sac_compatible: bool = False,
+        quantum_residual_gain: float = 0.05,
     ):
         super().__init__()
         obs_dim, tuple_obs = _obs_dim_and_mode(obs_space)
         self.tuple_obs = tuple_obs
         act_dim = act_space.shape[0]
-        self.net = QuantumFeatureBackbone(
+        backbone_cls = SACCompatibleQuantumBackbone if _bool(sac_compatible) else QuantumFeatureBackbone
+        self.net = backbone_cls(
             input_dim=obs_dim + act_dim,
             hidden_dim=hidden_dim,
             depth=depth,
@@ -358,6 +416,7 @@ class QuantumMLPQFunction(nn.Module):
             qiskit_seed=qiskit_seed,
             qiskit_fallback_on_error=qiskit_fallback_on_error,
             qiskit_strict=qiskit_strict,
+            quantum_residual_gain=quantum_residual_gain,
         )
         self.q_out = nn.Linear(hidden_dim, 1)
 
@@ -390,6 +449,8 @@ class QuantumMLPActorCritic(nn.Module):
         forward_bias_init: float = 1.8,
         brake_bias_init: float = -2.0,
         steer_bias_init: float = 0.0,
+        sac_compatible: bool = False,
+        quantum_residual_gain: float = 0.05,
     ):
         super().__init__()
         self.actor = QuantumSquashedGaussianMLPActor(
@@ -407,6 +468,8 @@ class QuantumMLPActorCritic(nn.Module):
             forward_bias_init=forward_bias_init,
             brake_bias_init=brake_bias_init,
             steer_bias_init=steer_bias_init,
+            sac_compatible=sac_compatible,
+            quantum_residual_gain=quantum_residual_gain,
         )
         self.q1 = QuantumMLPQFunction(
             obs_space=observation_space,
@@ -420,6 +483,8 @@ class QuantumMLPActorCritic(nn.Module):
             qiskit_seed=qiskit_seed,
             qiskit_fallback_on_error=qiskit_fallback_on_error,
             qiskit_strict=qiskit_strict,
+            sac_compatible=sac_compatible,
+            quantum_residual_gain=quantum_residual_gain,
         )
         self.q2 = QuantumMLPQFunction(
             obs_space=observation_space,
@@ -433,6 +498,8 @@ class QuantumMLPActorCritic(nn.Module):
             qiskit_seed=qiskit_seed,
             qiskit_fallback_on_error=qiskit_fallback_on_error,
             qiskit_strict=qiskit_strict,
+            sac_compatible=sac_compatible,
+            quantum_residual_gain=quantum_residual_gain,
         )
 
     def act(self, obs, test=False):

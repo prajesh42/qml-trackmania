@@ -66,6 +66,22 @@ def update_memory(run_instance):
     return run_instance
 
 
+def update_quantum_residual_gain(run_instance, gain):
+    updated = 0
+    for attr in ("model", "model_target", "model_nograd"):
+        model = getattr(run_instance.agent, attr, None)
+        if model is None:
+            continue
+        for module in model.modules():
+            if hasattr(module, "quantum_residual_gain"):
+                module.quantum_residual_gain = float(gain)
+                updated += 1
+    if updated:
+        run_instance.agent.__dict__.pop("model_nograd", None)
+        logging.info(f"QSAC quantum residual gain set to {gain} on {updated} module(s).")
+    return run_instance
+
+
 def update_run_instance(run_instance, training_cls):
     """
     Updates the checkpoint after loading with compatible values from config.json
@@ -117,6 +133,8 @@ def update_run_instance(run_instance, training_cls):
         learn_entropy_coef = ALG_CONFIG["LEARN_ENTROPY_COEF"]
         target_entropy = ALG_CONFIG["TARGET_ENTROPY"]
         alpha = ALG_CONFIG["ALPHA"]
+        if ALG_NAME == "QSAC" and "QSAC_QUANTUM_RESIDUAL_GAIN" in ALG_CONFIG:
+            run_instance = update_quantum_residual_gain(run_instance, ALG_CONFIG["QSAC_QUANTUM_RESIDUAL_GAIN"])
 
         if ALG_NAME in ["SAC", "QSAC"]:
             if run_instance.agent.lr_actor != lr_actor:
